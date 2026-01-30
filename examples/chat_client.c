@@ -74,7 +74,7 @@ int main(int argc, char** argv) {
         // Split host and port if present
         char* p = strchr(host, ':');
         if (p) {
-            *p = '\0'; // Note: modifies argv[1]
+            *p = '\0';  // Note: modifies argv[1]
             port = atoi(p + 1);
         }
     }

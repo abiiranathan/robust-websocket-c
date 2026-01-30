@@ -1,1 +1,3 @@
 bin
+build
+tests/autobahn/reports

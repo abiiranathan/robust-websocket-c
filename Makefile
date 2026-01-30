@@ -23,12 +23,15 @@ OBJS = $(SRCS:$(SRC_DIR)/%.c=$(OBJ_DIR)/%.o)
 CHAT_CLIENT_SRC = $(ex_DIR)/chat_client.c
 CHAT_SERVER_SRC = $(ex_DIR)/chat_server.c
 
+ECHO_SERVER_SRC = $(ex_DIR)/echo_server.c
+
 CHAT_CLIENT_BIN = $(BIN_DIR)/chat_client
 CHAT_SERVER_BIN = $(BIN_DIR)/chat_server
+ECHO_SERVER_BIN = $(BIN_DIR)/echo_server
 
 .PHONY: all clean directories
 
-all: directories $(LIB_PATH) $(CHAT_CLIENT_BIN) $(CHAT_SERVER_BIN)
+all: directories $(LIB_PATH) $(CHAT_CLIENT_BIN) $(CHAT_SERVER_BIN) $(ECHO_SERVER_BIN)
 
 directories:
 	@mkdir -p $(OBJ_DIR) $(BIN_DIR) $(LIB_DIR)
@@ -46,6 +49,9 @@ $(CHAT_CLIENT_BIN): $(CHAT_CLIENT_SRC) $(LIB_PATH)
 	$(CC) $(CFLAGS) $< -o $@ -L$(LIB_DIR) -lwebsocket $(LDFLAGS)
 
 $(CHAT_SERVER_BIN): $(CHAT_SERVER_SRC) $(LIB_PATH)
+	$(CC) $(CFLAGS) $< -o $@ -L$(LIB_DIR) -lwebsocket $(LDFLAGS)
+
+$(ECHO_SERVER_BIN): $(ECHO_SERVER_SRC) $(LIB_PATH)
 	$(CC) $(CFLAGS) $< -o $@ -L$(LIB_DIR) -lwebsocket $(LDFLAGS)
 
 clean:
