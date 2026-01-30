@@ -1189,3 +1189,124 @@ bool ws_is_alive(ws_client_t* client) {
     pthread_mutex_unlock(&client->lock);
     return alive;
 }
+// ============================================================================
+// Interactive Mode (stdin + WebSocket)
+// ============================================================================
+
+#define WS_STDIN_BUFFER_SIZE 4096
+
+typedef struct {
+    uint8_t buffer[WS_STDIN_BUFFER_SIZE];
+    size_t len;
+} ws_stdin_reader_t;
+
+ws_error_t ws_run_interactive(ws_client_t* client, ws_stdin_line_handler_t handler, void* user_data, int timeout_ms) {
+    if (!client || !handler) {
+        return WS_ERR_INVALID_PARAMETER;
+    }
+
+    ws_stdin_reader_t stdin_reader = {0};
+    uint8_t ws_buffer[4096];
+    int stdin_fd = STDIN_FILENO;
+
+    // Continue while connected, connecting, or closing
+    while (true) {
+        ws_state_t state = ws_get_state(client);
+
+        // Exit if connection is closed or failed
+        if (state == WS_STATE_CLOSED) {
+            break;
+        }
+
+        fd_set readfds;
+        FD_ZERO(&readfds);
+
+        if (stdin_fd != -1) {
+            FD_SET(stdin_fd, &readfds);
+        }
+        FD_SET(client->socket_fd, &readfds);
+
+        int max_fd = (client->socket_fd > stdin_fd) ? client->socket_fd : stdin_fd;
+
+        struct timeval tv;
+        tv.tv_sec = timeout_ms / 1000;
+        tv.tv_usec = (timeout_ms % 1000) * 1000;
+
+        int ret = select(max_fd + 1, &readfds, NULL, NULL, &tv);
+        if (ret < 0) {
+            if (errno == EINTR) continue;
+            return WS_ERR_IO_ERROR;
+        }
+
+        // Handle stdin (user input)
+        if (stdin_fd != -1 && FD_ISSET(stdin_fd, &readfds)) {
+            ssize_t n = read(stdin_fd, stdin_reader.buffer + stdin_reader.len,
+                             sizeof(stdin_reader.buffer) - stdin_reader.len - 1);
+
+            if (n > 0) {
+                stdin_reader.len += (size_t)n;
+                stdin_reader.buffer[stdin_reader.len] = '\0';
+
+                // Process complete lines
+                char* newline;
+                while ((newline = (char*)memchr(stdin_reader.buffer, '\n', stdin_reader.len))) {
+                    *newline = '\0';
+
+                    // Remove carriage return if present
+                    if (newline > (char*)stdin_reader.buffer && *(newline - 1) == '\r') {
+                        *(newline - 1) = '\0';
+                    }
+
+                    // Only call handler if connected (not connecting or closing)
+                    if (state == WS_STATE_OPEN) {
+                        handler(client, (const char*)stdin_reader.buffer, user_data);
+                    }
+
+                    // Move remaining data to front
+                    size_t line_len = (size_t)(newline - (char*)stdin_reader.buffer) + 1;
+                    size_t remaining = stdin_reader.len - line_len;
+                    if (remaining > 0) {
+                        memmove(stdin_reader.buffer, stdin_reader.buffer + line_len, remaining);
+                    }
+                    stdin_reader.len = remaining;
+                    stdin_reader.buffer[stdin_reader.len] = '\0';
+                }
+
+                // Protect against overly long input lines
+                if (stdin_reader.len >= sizeof(stdin_reader.buffer) - 1) {
+                    fprintf(stderr, "[Error] Input line too long\n");
+                    stdin_reader.len = 0;
+                    stdin_reader.buffer[0] = '\0';
+                }
+            } else if (n == 0) {
+                // EOF on stdin
+                stdin_fd = -1;
+            } else {
+                if (errno != EINTR && errno != EAGAIN) {
+                    return WS_ERR_IO_ERROR;
+                }
+            }
+        }
+
+        // Handle data from server (needed for handshake and messages)
+        if (FD_ISSET(client->socket_fd, &readfds)) {
+            ssize_t n = ws_read(client, ws_buffer, sizeof(ws_buffer));
+
+            if (n < 0) {
+                if (errno != EINTR) {
+                    return WS_ERR_IO_ERROR;
+                }
+            } else if (n == 0) {
+                // Connection closed
+                break;
+            } else {
+                ws_error_t err = ws_consume(client, ws_buffer, (size_t)n);
+                if (err != WS_OK) {
+                    return err;
+                }
+            }
+        }
+    }
+
+    return WS_OK;
+}

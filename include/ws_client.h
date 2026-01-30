@@ -54,6 +54,9 @@ typedef struct {
     pthread_t thread;
     bool thread_running;
 
+    // Callbacks
+    ws_on_pong_cb on_pong;
+
     // Statistics
     uint64_t reconnect_count;
     uint64_t messages_sent;

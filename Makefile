@@ -16,7 +16,7 @@ LIB_NAME = libwebsocket.a
 LIB_PATH = $(LIB_DIR)/$(LIB_NAME)
 
 # Source and Objects
-SRCS = $(wildcard $(SRC_DIR)/*.c)
+SRCS = $(wildcard $(SRC_DIR)/*.c) $(SRC_DIR)/ws_client.c
 OBJS = $(SRCS:$(SRC_DIR)/%.c=$(OBJ_DIR)/%.o)
 
 # Examples
@@ -45,8 +45,8 @@ $(OBJ_DIR)/%.o: $(SRC_DIR)/%.c
 	$(CC) $(CFLAGS) -c $< -o $@
 
 # Build Examples
-$(CHAT_CLIENT_BIN): $(CHAT_CLIENT_SRC) $(LIB_PATH)
-	$(CC) $(CFLAGS) $< -o $@ -L$(LIB_DIR) -lwebsocket $(LDFLAGS)
+$(CHAT_CLIENT_BIN): $(CHAT_CLIENT_SRC) $(OBJ_DIR)/ws_client.o $(LIB_PATH)
+	$(CC) $(CFLAGS) $< $(OBJ_DIR)/ws_client.o -o $@ -L$(LIB_DIR) -lwebsocket $(LDFLAGS)
 
 $(CHAT_SERVER_BIN): $(CHAT_SERVER_SRC) $(LIB_PATH)
 	$(CC) $(CFLAGS) $< -o $@ -L$(LIB_DIR) -lwebsocket $(LDFLAGS)

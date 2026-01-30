@@ -221,6 +221,32 @@ ws_state_t ws_get_state(ws_client_t* client);
 void ws_get_statistics(ws_client_t* client, ws_statistics_t* stats);
 
 // ============================================================================
+// Interactive Mode (stdin + WebSocket)
+// ============================================================================
+
+// Typedef for line handler callback - called when a complete line is read from stdin
+// client: WebSocket client (can be used to send messages)
+// line: null-terminated string (without newline)
+// user_data: optional user data passed to ws_run_interactive
+typedef void (*ws_stdin_line_handler_t)(ws_client_t* client, const char* line, void* user_data);
+
+// Run interactive client loop that reads from stdin and communicates with server
+// This function:
+//   - Reads from stdin using select() to avoid blocking on socket
+//   - Calls handler for each complete line entered
+//   - Processes incoming WebSocket messages via client callbacks
+//   - Continues until connection closes
+//
+// Parameters:
+//   client: Connected WebSocket client
+//   handler: Callback function called for each complete line read
+//   user_data: optional data passed to handler (can be NULL)
+//   timeout_ms: Timeout for select() (0 for blocking, >0 for polling)
+//
+// Returns: WS_OK on normal disconnect, error code on failure
+ws_error_t ws_run_interactive(ws_client_t* client, ws_stdin_line_handler_t handler, void* user_data, int timeout_ms);
+
+// ============================================================================
 // Low-level Utilities (exposed for testing/advanced usage)
 // ============================================================================
 

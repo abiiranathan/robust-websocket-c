@@ -30,6 +30,18 @@ static void sleep_ms(int ms) {
     nanosleep(&ts, NULL);
 }
 
+// Internal callback to update last_pong_received
+static void ws_client_internal_on_pong(ws_client_t* client, const uint8_t* data, size_t len) {
+    ws_client_context_t* ctx = (ws_client_context_t*)ws_get_user_data(client);
+    if (ctx) {
+        ctx->last_pong_received = get_current_time();
+    }
+    // If the user also set an on_pong callback, call it
+    if (ctx && ctx->on_pong) {
+        ctx->on_pong(client, data, len);
+    }
+}
+
 // ============================================================================
 // Configuration
 // ============================================================================
@@ -90,11 +102,17 @@ void ws_client_init(ws_client_context_t* ctx) {
     memset(ctx, 0, sizeof(ws_client_context_t));
     ws_init(&ctx->ws_client);
 
+    // Set user data for the underlying ws_client_t to point back to ws_client_context_t
+    ws_set_user_data(&ctx->ws_client, ctx);
+
     ctx->config = ws_client_default_config();
     ctx->running = false;
     ctx->should_reconnect = false;
     ctx->reconnect_attempts = 0;
     ctx->thread_running = false;
+
+    // Set internal pong callback to update last_pong_received
+    ctx->ws_client.on_pong = ws_client_internal_on_pong;
 }
 
 void ws_client_configure(ws_client_context_t* ctx, ws_client_config_t* config) {
@@ -117,6 +135,8 @@ ws_error_t ws_client_connect(ws_client_context_t* ctx) {
     if (ctx->ws_client.state != WS_STATE_CLOSED) {
         ws_cleanup(&ctx->ws_client);
         ws_init(&ctx->ws_client);
+        ws_set_user_data(&ctx->ws_client, ctx);               // Re-set user data after re-init
+        ctx->ws_client.on_pong = ws_client_internal_on_pong;  // Re-set internal pong handler
     }
 
     ctx->connection_started = get_current_time();
@@ -140,6 +160,8 @@ ws_error_t ws_client_connect(ws_client_context_t* ctx) {
             if (elapsed >= ctx->config.connect_timeout) {
                 ws_cleanup(&ctx->ws_client);
                 ws_init(&ctx->ws_client);
+                ws_set_user_data(&ctx->ws_client, ctx);               // Re-set user data after re-init
+                ctx->ws_client.on_pong = ws_client_internal_on_pong;  // Re-set internal pong handler
                 return WS_ERR_CONNECT_FAILED;
             }
         }
@@ -158,6 +180,8 @@ ws_error_t ws_client_connect(ws_client_context_t* ctx) {
             if (errno == EINTR) continue;
             ws_cleanup(&ctx->ws_client);
             ws_init(&ctx->ws_client);
+            ws_set_user_data(&ctx->ws_client, ctx);               // Re-set user data after re-init
+            ctx->ws_client.on_pong = ws_client_internal_on_pong;  // Re-set internal pong handler
             return WS_ERR_IO_ERROR;
         }
 
@@ -169,12 +193,16 @@ ws_error_t ws_client_connect(ws_client_context_t* ctx) {
             if (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR) continue;
             ws_cleanup(&ctx->ws_client);
             ws_init(&ctx->ws_client);
+            ws_set_user_data(&ctx->ws_client, ctx);               // Re-set user data after re-init
+            ctx->ws_client.on_pong = ws_client_internal_on_pong;  // Re-set internal pong handler
             return WS_ERR_IO_ERROR;
         }
 
         if (n == 0) {
             ws_cleanup(&ctx->ws_client);
             ws_init(&ctx->ws_client);
+            ws_set_user_data(&ctx->ws_client, ctx);               // Re-set user data after re-init
+            ctx->ws_client.on_pong = ws_client_internal_on_pong;  // Re-set internal pong handler
             return WS_ERR_CONNECT_FAILED;
         }
 
@@ -182,6 +210,8 @@ ws_error_t ws_client_connect(ws_client_context_t* ctx) {
         if (consume_err != WS_OK) {
             ws_cleanup(&ctx->ws_client);
             ws_init(&ctx->ws_client);
+            ws_set_user_data(&ctx->ws_client, ctx);               // Re-set user data after re-init
+            ctx->ws_client.on_pong = ws_client_internal_on_pong;  // Re-set internal pong handler
             return consume_err;
         }
     }
@@ -190,6 +220,8 @@ ws_error_t ws_client_connect(ws_client_context_t* ctx) {
     if (ctx->ws_client.state != WS_STATE_OPEN) {
         ws_cleanup(&ctx->ws_client);
         ws_init(&ctx->ws_client);
+        ws_set_user_data(&ctx->ws_client, ctx);               // Re-set user data after re-init
+        ctx->ws_client.on_pong = ws_client_internal_on_pong;  // Re-set internal pong handler
         return WS_ERR_HANDSHAKE_FAILED;
     }
 
@@ -262,8 +294,7 @@ static int process_events(ws_client_context_t* ctx, int timeout_ms) {
 
         // Check pong timeout
         if (ctx->config.pong_timeout > 0 && ctx->last_ping_sent > 0) {
-            time_t since_last_pong = now - ctx->last_pong_received;
-            if (since_last_pong > ctx->config.pong_timeout + ctx->config.ping_interval) {
+            if (ctx->last_ping_sent > ctx->last_pong_received && now - ctx->last_ping_sent > ctx->config.pong_timeout) {
                 // No pong received, connection may be dead
                 if (ctx->ws_client.on_error) {
                     ctx->ws_client.on_error(&ctx->ws_client, "Pong timeout");
@@ -378,9 +409,11 @@ void ws_client_run(ws_client_context_t* ctx) {
 
                     ws_cleanup(&ctx->ws_client);
                     ws_init(&ctx->ws_client);
-
-                    // Restore callbacks (they were cleared by ws_init)
-                    // User should have set them before calling run
+                    ws_set_user_data(&ctx->ws_client, ctx);  // Re-set user data after re-init
+                    // Restore internal and external callbacks
+                    ctx->ws_client.on_pong = ws_client_internal_on_pong;
+                    // Restore other user-defined callbacks if any, example:
+                    // ctx->ws_client.on_open = ctx->on_open;
 
                     ws_error_t err = ws_client_connect(ctx);
                     if (err == WS_OK) {
