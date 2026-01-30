@@ -197,6 +197,8 @@ void ws_cleanup(ws_client_t* client) {
     if (client->frag_buffer) free(client->frag_buffer);
 
     if (client->socket_fd != -1) {
+        // Shutdown socket first to stop traffic
+        shutdown(client->socket_fd, SHUT_RDWR);
         close(client->socket_fd);
         client->socket_fd = -1;
     }
@@ -209,7 +211,7 @@ void ws_cleanup(ws_client_t* client) {
 
 static int default_write_cb(ws_client_t* client, const uint8_t* data, size_t len) {
     if (client->socket_fd < 0) return -1;
-    ssize_t written = write(client->socket_fd, data, len);
+    ssize_t written = send(client->socket_fd, data, len, MSG_NOSIGNAL);
     if (written != (ssize_t)len) return -1;
     client->stats.bytes_sent += len;
     return 0;

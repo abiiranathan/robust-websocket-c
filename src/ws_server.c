@@ -107,7 +107,7 @@ static int server_write_cb(ws_client_t* client, const uint8_t* data, size_t len)
     // Try to write directly if buffer is empty
     size_t written = 0;
     if (conn->out_len == 0) {
-        ssize_t n = write(client->socket_fd, data, len);
+        ssize_t n = send(client->socket_fd, data, len, MSG_NOSIGNAL);
         if (n < 0) {
             if (errno == EAGAIN || errno == EWOULDBLOCK) {
                 written = 0;
@@ -119,7 +119,7 @@ static int server_write_cb(ws_client_t* client, const uint8_t* data, size_t len)
             written = (size_t)n;
         }
     }
-
+    
     // Buffer remaining
     if (written < len) {
         size_t remaining = len - written;
@@ -136,14 +136,14 @@ static int server_write_cb(ws_client_t* client, const uint8_t* data, size_t len)
         }
         memcpy(conn->out_buf + conn->out_len, data + written, remaining);
         conn->out_len += remaining;
-
+        
         // Register for EPOLLOUT
         struct epoll_event ev;
-        ev.events = EPOLLIN | EPOLLOUT | EPOLLET;  // Edge Triggered
+        ev.events = EPOLLIN | EPOLLOUT | EPOLLET; // Edge Triggered
         ev.data.ptr = conn;
         epoll_ctl(conn->epoll_fd, EPOLL_CTL_MOD, client->socket_fd, &ev);
     }
-
+    
     pthread_mutex_unlock(&conn->out_lock);
     return 0;
 }
@@ -279,7 +279,7 @@ static void* worker_routine(void* arg) {
             if (evs & EPOLLOUT) {
                 pthread_mutex_lock(&conn->out_lock);
                 if (conn->out_len > 0) {
-                    ssize_t written = write(fd, conn->out_buf, conn->out_len);
+                    ssize_t written = send(fd, conn->out_buf, conn->out_len, MSG_NOSIGNAL);
                     if (written > 0) {
                         if ((size_t)written == conn->out_len) {
                             // Done
