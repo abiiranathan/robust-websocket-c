@@ -23,6 +23,14 @@ void on_open(ws_client_t* client) {
 
 void on_message(ws_client_t* client, const uint8_t* data, size_t size, int type) {
     if (type == WS_OPCODE_TEXT) {
+        if (size == 0) {
+            printf("Received Empty Text Message\n");
+            passed++;
+            // Final check passed
+            ws_close(client, 1000, "Normal Closure");
+            return;
+        }
+
         char* text = malloc(size + 1);
         if (!text) {
             printf("Memory allocation failed\n");
@@ -51,7 +59,9 @@ void on_message(ws_client_t* client, const uint8_t* data, size_t size, int type)
         if (size == 4 && data[0] == 0xDE && data[1] == 0xAD && data[2] == 0xBE && data[3] == 0xEF) {
             printf("Binary Echo Passed\n");
             passed++;
-            ws_close(client, 1000, "Normal Closure");
+            
+            // Send Empty Text
+            ws_send_text(client, NULL, 0);
         } else {
             printf("Binary Echo Failed\n");
             failed++;
@@ -156,7 +166,7 @@ int main() {
         printf("Test Failed: %d errors occurred\n", failed);
         return 1;
     }
-    if (passed < 2) {
+    if (passed < 3) {
         printf("Test Failed: Not all tests passed (passed: %d)\n", passed);
         return 1;
     }

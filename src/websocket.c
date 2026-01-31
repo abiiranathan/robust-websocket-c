@@ -942,16 +942,22 @@ static void dispatch_frame(ws_client_t* client, websocket_frame_t* frame) {
 
 // Internal function, expects lock to be held
 static ws_error_t send_fragmented(ws_client_t* client, const uint8_t* data, size_t len, int opcode) {
-    if (!client || !data) return WS_ERR_INVALID_PARAMETER;
+    if (!client) return WS_ERR_INVALID_PARAMETER;
+    if (len > 0 && !data) return WS_ERR_INVALID_PARAMETER;
     if (client->state != WS_STATE_OPEN) return WS_ERR_INVALID_STATE;
 
     size_t offset = 0;
     bool first = true;
 
-    while (offset < len) {
+    do {
         size_t chunk_size = len - offset;
         if (client->auto_fragment && chunk_size > client->fragment_size) {
             chunk_size = client->fragment_size;
+        }
+
+        // Ensure we send at least one frame if len is 0
+        if (len == 0) {
+            chunk_size = 0;
         }
 
         bool last = (offset + chunk_size >= len);
@@ -1014,12 +1020,18 @@ static ws_error_t send_fragmented(ws_client_t* client, const uint8_t* data, size
 
         offset += chunk_size;
         first = false;
-    }
+
+        // If len is 0, we are done after one iteration
+        if (len == 0) break;
+
+    } while (offset < len);
+
     return WS_OK;
 }
 
 ws_error_t ws_send_text(ws_client_t* client, const char* text, size_t len) {
-    if (!client || !text) return WS_ERR_INVALID_PARAMETER;
+    if (!client) return WS_ERR_INVALID_PARAMETER;
+    if (len > 0 && !text) return WS_ERR_INVALID_PARAMETER;
 
     pthread_mutex_lock(&client->lock);
     ws_error_t err = send_fragmented(client, (const uint8_t*)text, len, WS_OPCODE_TEXT);
@@ -1028,7 +1040,8 @@ ws_error_t ws_send_text(ws_client_t* client, const char* text, size_t len) {
 }
 
 ws_error_t ws_send_binary(ws_client_t* client, const uint8_t* data, size_t len) {
-    if (!client || !data) return WS_ERR_INVALID_PARAMETER;
+    if (!client) return WS_ERR_INVALID_PARAMETER;
+    if (len > 0 && !data) return WS_ERR_INVALID_PARAMETER;
 
     pthread_mutex_lock(&client->lock);
     ws_error_t err = send_fragmented(client, data, len, WS_OPCODE_BINARY);
