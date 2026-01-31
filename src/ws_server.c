@@ -11,9 +11,14 @@
 #include <sys/sysinfo.h>
 #include <unistd.h>
 
-#define MAX_EVENTS        64
-#define READ_BUFFER_SIZE  4096
-#define MAX_OUTPUT_BUFFER (1024 * 1024 * 10)  // 10MB max output buffer per client
+// Maximum events for epoll_wait
+#define MAX_EVENTS 64
+
+// Buffer size for reading data
+#define READ_BUFFER_SIZE 4096
+
+// 64MB max output buffer per client
+#define MAX_OUTPUT_BUFFER (1024 * 1024 * 64)
 
 // --- Internal Structures ---
 
@@ -454,11 +459,8 @@ static void* worker_routine(void* arg) {
                     }
 
                     // Check for Protocol Error Close (Fail the connection immediately)
-                    if (conn->ws_client.state == WS_STATE_CLOSING &&
-                        conn->ws_client.close_code != WS_STATUS_NORMAL &&
-                        conn->ws_client.close_code != WS_STATUS_GOING_AWAY &&
-                        conn->ws_client.close_code != 0) {
-
+                    if (conn->ws_client.state == WS_STATE_CLOSING && conn->ws_client.close_code != WS_STATUS_NORMAL &&
+                        conn->ws_client.close_code != WS_STATUS_GOING_AWAY && conn->ws_client.close_code != 0) {
                         conn->state = CONN_STATE_CLOSING;
                         pthread_mutex_lock(&conn->out_lock);
                         bool pending = (conn->out_len > 0);
@@ -480,7 +482,7 @@ static void* worker_routine(void* arg) {
                             conn->state = CONN_STATE_CLOSING;
                             break;
                         } else {
-                            read_error = true; // Trigger cleanup
+                            read_error = true;  // Trigger cleanup
                             break;
                         }
                     }
@@ -910,7 +912,8 @@ void ws_server_broadcast_binary(ws_server_t* server, const uint8_t* data, size_t
     ws_server_broadcast_binary_filter(server, data, len, NULL, NULL);
 }
 
-void ws_server_broadcast_text_filter(ws_server_t* server, const char* msg, size_t len, ws_filter_cb_t filter, void* arg) {
+void ws_server_broadcast_text_filter(ws_server_t* server, const char* msg, size_t len, ws_filter_cb_t filter,
+                                     void* arg) {
     if (!server || !msg) return;
 
     for (int i = 0; i < server->worker_count; ++i) {

@@ -209,7 +209,7 @@ void ws_init(ws_client_t* client) {
     client->use_ssl = false;
 
     // Default config
-    client->max_payload_size = 1024 * 1024 * 16;  // 16MB
+    client->max_payload_size = 1024 * 1024 * 64;  // 64 MB
     client->validate_utf8 = true;
     client->auto_fragment = false;
     client->fragment_size = 4096;
@@ -308,16 +308,32 @@ static int default_write_cb(ws_client_t* client, const uint8_t* data, size_t len
     if (!client || !data || len == 0) return -1;
     if (client->socket_fd < 0) return -1;
 
-    if (client->use_ssl && client->ssl) {
-        int written = SSL_write(client->ssl, data, (int)len);
-        if (written <= 0) return -1;
-        client->stats.bytes_sent += (uint64_t)written;
-        return 0;
+    size_t sent = 0;
+    while (sent < len) {
+        if (client->use_ssl && client->ssl) {
+            int chunk = (len - sent) > 2147483647 ? 2147483647 : (int)(len - sent);
+            int written = SSL_write(client->ssl, data + sent, chunk);
+            if (written <= 0) {
+                int err = SSL_get_error(client->ssl, written);
+                if (err == SSL_ERROR_WANT_READ || err == SSL_ERROR_WANT_WRITE) {
+                     // For blocking sockets, this shouldn't typically happen unless
+                     // explicitly configured. We'll treat it as a retry.
+                     continue; 
+                }
+                return -1;
+            }
+            sent += (size_t)written;
+            client->stats.bytes_sent += (uint64_t)written;
+        } else {
+            ssize_t written = send(client->socket_fd, data + sent, len - sent, MSG_NOSIGNAL);
+            if (written < 0) {
+                if (errno == EINTR) continue;
+                return -1;
+            }
+            sent += (size_t)written;
+            client->stats.bytes_sent += (uint64_t)written;
+        }
     }
-
-    ssize_t written = send(client->socket_fd, data, len, MSG_NOSIGNAL);
-    if (written != (ssize_t)len) return -1;
-    client->stats.bytes_sent += len;
     return 0;
 }
 
