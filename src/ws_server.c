@@ -453,6 +453,23 @@ static void* worker_routine(void* arg) {
                         break;
                     }
 
+                    // Check for Protocol Error Close (Fail the connection immediately)
+                    if (conn->ws_client.state == WS_STATE_CLOSING &&
+                        conn->ws_client.close_code != WS_STATUS_NORMAL &&
+                        conn->ws_client.close_code != WS_STATUS_GOING_AWAY &&
+                        conn->ws_client.close_code != 0) {
+
+                        conn->state = CONN_STATE_CLOSING;
+                        pthread_mutex_lock(&conn->out_lock);
+                        bool pending = (conn->out_len > 0);
+                        pthread_mutex_unlock(&conn->out_lock);
+
+                        if (!pending) {
+                            cleanup_connection(conn);
+                            break;
+                        }
+                    }
+
                     // Check if underlying client state is closed (e.g. after receiving Close frame)
                     if (conn->ws_client.state == WS_STATE_CLOSED) {
                         pthread_mutex_lock(&conn->out_lock);

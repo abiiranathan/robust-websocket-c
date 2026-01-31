@@ -160,6 +160,9 @@ struct ws_client_s {
     ws_statistics_t stats;
     struct timespec last_ping_at;
     struct timespec last_pong_at;
+    
+    // Close status
+    uint16_t close_code;
 };
 
 // ============================================================================

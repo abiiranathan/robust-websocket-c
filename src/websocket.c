@@ -214,6 +214,7 @@ void ws_init(ws_client_t* client) {
     client->auto_fragment = false;
     client->fragment_size = 4096;
     client->auto_ping = true;
+    client->close_code = 0;
 
     pthread_mutexattr_t attr;
     pthread_mutexattr_init(&attr);
@@ -1118,6 +1119,7 @@ ws_error_t ws_close(ws_client_t* client, int code, const char* reason) {
     }
 
     client->state = WS_STATE_CLOSING;
+    client->close_code = (uint16_t)code;
 
     websocket_frame_t frame = {0};
     frame.fin = true;
