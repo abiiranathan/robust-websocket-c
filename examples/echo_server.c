@@ -8,7 +8,7 @@ static ws_server_t* server = NULL;
 
 void on_message(ws_client_t* client, const uint8_t* data, size_t size, int type) {
     if (type == WS_OPCODE_TEXT) {
-        ws_send_text(client, (const char*)data);
+        ws_send_text_len(client, (const char*)data, size);
     } else if (type == WS_OPCODE_BINARY) {
         ws_send_binary(client, data, size);
     }

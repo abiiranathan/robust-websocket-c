@@ -701,6 +701,16 @@ ws_error_t ws_consume(ws_client_t* client, const uint8_t* data, size_t len) {
             dispatch_frame(client, &frame);
             client->stats.frames_received++;
 
+            // Check if connection was closed during dispatch
+            if (client->state == WS_STATE_CLOSING || client->state == WS_STATE_CLOSED) {
+                // If closing/closed, we stop processing further frames
+                // But we still need to manage the buffer - actually if closed, we can just return
+                // The remaining data in buffer is discarded or kept for next call (if any)
+                // But typically if closed, we stop.
+                pthread_mutex_unlock(&client->lock);
+                return WS_OK;  // Or appropriate status
+            }
+
             // Remove processed frame
             size_t remaining = client->recv_buffer_len - (size_t)bytes_consumed;
             if (remaining > 0) {
@@ -743,15 +753,47 @@ static void dispatch_frame(ws_client_t* client, websocket_frame_t* frame) {
                 char reason[128] = {0};
                 if (frame->payload_length >= 2) {
                     code = (frame->payload[0] << 8) | frame->payload[1];
+
+                    // Validate close code
+                    bool valid_code = (code >= 1000 && code <= 1003) || (code >= 1007 && code <= 1011) ||
+                                      (code >= 3000 && code <= 4999);
+
+                    if (!valid_code) {
+                        // Invalid close code
+                        ws_close(client, WS_STATUS_PROTOCOL_ERROR, "Invalid close code");
+                        client->state = WS_STATE_CLOSED;
+                        client->stats.closed_at = time(NULL);
+                        if (client->on_close) {
+                            client->on_close(client, WS_STATUS_PROTOCOL_ERROR, "Invalid close code");
+                        }
+                        return;
+                    }
+
                     if (frame->payload_length > 2) {
                         size_t rlen = frame->payload_length - 2;
                         if (rlen > 123) rlen = 123;
                         memcpy(reason, frame->payload + 2, rlen);
                         // Validate UTF8 of reason
                         if (client->validate_utf8 && !is_valid_utf8((uint8_t*)reason, rlen)) {
-                            code = WS_STATUS_INVALID_DATA;
+                            code = WS_STATUS_INVALID_DATA;  // Fail the close logic?
+                            // RFC6455 says: if invalid utf8 in reason, fail connection
+                            ws_close(client, WS_STATUS_INVALID_DATA, "Invalid UTF-8 in close reason");
+                            client->state = WS_STATE_CLOSED;
+                            client->stats.closed_at = time(NULL);
+                            if (client->on_close) {
+                                client->on_close(client, WS_STATUS_INVALID_DATA, "Invalid UTF-8 in close reason");
+                            }
+                            return;
                         }
                     }
+                } else if (frame->payload_length == 1) {
+                    ws_close(client, WS_STATUS_PROTOCOL_ERROR, "Invalid close payload length");
+                    client->state = WS_STATE_CLOSED;
+                    client->stats.closed_at = time(NULL);
+                    if (client->on_close) {
+                        client->on_close(client, WS_STATUS_PROTOCOL_ERROR, "Invalid close payload length");
+                    }
+                    return;
                 }
 
                 if (client->state == WS_STATE_OPEN) {
@@ -871,7 +913,12 @@ static void dispatch_frame(ws_client_t* client, websocket_frame_t* frame) {
         client->frag_arena.cap = new_cap;
     }
 
-    memcpy(client->frag_arena.buffer + client->frag_arena.len, frame->payload, frame->payload_length);
+    if (frame->payload_length > 0) {
+        // Protect against memcpy with NULL buffer (though realloc should handle cap>0)
+        // If cap was 0 and payload_length > 0, we entered the realloc block above.
+        // If payload_length is 0, we don't copy.
+        memcpy(client->frag_arena.buffer + client->frag_arena.len, frame->payload, frame->payload_length);
+    }
     client->frag_arena.len += frame->payload_length;
 
     if (frame->fin) {
@@ -979,6 +1026,17 @@ ws_error_t ws_send_text(ws_client_t* client, const char* text) {
 
     pthread_mutex_lock(&client->lock);
     ws_error_t err = send_fragmented(client, (const uint8_t*)text, strlen(text), WS_OPCODE_TEXT);
+    pthread_mutex_unlock(&client->lock);
+    return err;
+}
+
+ws_error_t ws_send_text_len(ws_client_t* client, const char* text, size_t len) {
+    if (!client) return WS_ERR_INVALID_PARAMETER;
+    // Allow text to be NULL if len is 0 (empty message)
+    if (len > 0 && !text) return WS_ERR_INVALID_PARAMETER;
+
+    pthread_mutex_lock(&client->lock);
+    ws_error_t err = send_fragmented(client, (const uint8_t*)text, len, WS_OPCODE_TEXT);
     pthread_mutex_unlock(&client->lock);
     return err;
 }

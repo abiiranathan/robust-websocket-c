@@ -191,6 +191,9 @@ ssize_t ws_read(ws_client_t* client, void* buffer, size_t len);
 // Send a text message
 ws_error_t ws_send_text(ws_client_t* client, const char* text);
 
+// Send a text message with explicit length
+ws_error_t ws_send_text_len(ws_client_t* client, const char* text, size_t len);
+
 // Send a binary message
 ws_error_t ws_send_binary(ws_client_t* client, const uint8_t* data, size_t len);
 

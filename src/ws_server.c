@@ -453,7 +453,22 @@ static void* worker_routine(void* arg) {
                         break;
                     }
 
-                    // Check if connection was closed during processing
+                    // Check if underlying client state is closed (e.g. after receiving Close frame)
+                    if (conn->ws_client.state == WS_STATE_CLOSED) {
+                        pthread_mutex_lock(&conn->out_lock);
+                        bool pending = (conn->out_len > 0);
+                        pthread_mutex_unlock(&conn->out_lock);
+
+                        if (pending) {
+                            conn->state = CONN_STATE_CLOSING;
+                            break;
+                        } else {
+                            read_error = true; // Trigger cleanup
+                            break;
+                        }
+                    }
+
+                    // Check if connection was closed during processing (by user callback?)
                     if (conn->state != CONN_STATE_ACTIVE) {
                         break;
                     }
@@ -467,7 +482,7 @@ static void* worker_routine(void* arg) {
             }
 
             // Handle Write
-            if ((evs & EPOLLOUT) && conn->state == CONN_STATE_ACTIVE) {
+            if ((evs & EPOLLOUT) && (conn->state == CONN_STATE_ACTIVE || conn->state == CONN_STATE_CLOSING)) {
                 pthread_mutex_lock(&conn->out_lock);
 
                 if (conn->out_len > 0) {
@@ -495,6 +510,12 @@ static void* worker_routine(void* arg) {
                             // All data sent
                             conn->out_len = 0;
 
+                            if (conn->state == CONN_STATE_CLOSING) {
+                                pthread_mutex_unlock(&conn->out_lock);
+                                cleanup_connection(conn);
+                                continue;
+                            }
+
                             // Stop watching EPOLLOUT
                             struct epoll_event ev;
                             ev.events = EPOLLIN | EPOLLET | EPOLLRDHUP;
@@ -508,10 +529,8 @@ static void* worker_routine(void* arg) {
                     } else if (written < 0 && errno != EAGAIN && errno != EWOULDBLOCK) {
                         // Write error
                         pthread_mutex_unlock(&conn->out_lock);
-                        if (conn->state == CONN_STATE_ACTIVE) {
-                            conn->state = CONN_STATE_CLOSING;
-                            cleanup_connection(conn);
-                        }
+                        conn->state = CONN_STATE_CLOSING;
+                        cleanup_connection(conn);
                         continue;
                     }
                 }
